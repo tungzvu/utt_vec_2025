@@ -1,101 +1,132 @@
-<script>
-  const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyxnxp7hWtKGHXYKf5gv5Xvoi9R1v5SD30RImpkS1D82alR4xp7hirEm3je6pqE9A2UYA/exec';
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tra cứu lớp (GitHub Pages + JSONP)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    select, button { padding: 8px 10px; font-size: 14px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 16px; }
+    th, td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
+    th { background: #f5f5f5; text-align: left; }
+    .muted { opacity: .75; }
+  </style>
+  <script defer>
+    const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyxnxp7hWtKGHXYKf5gv5Xvoi9R1v5SD30RImpkS1D82alR4xp7hirEm3je6pqE9A2UYA/exec';
 
-  // JSONP helper: trả Promise resolve với data
-  function jsonp(url) {
-    return new Promise((resolve, reject) => {
-      const cbName = 'cb_' + Math.random().toString(36).slice(2);
-      const sep = url.includes('?') ? '&' : '?';
-      const script = document.createElement('script');
-      script.src = `${url}${sep}callback=${cbName}`;
-      script.async = true;
+    // JSONP helper
+    function jsonp(url) {
+      return new Promise((resolve, reject) => {
+        const cbName = 'cb_' + Math.random().toString(36).slice(2);
+        const sep = url.includes('?') ? '&' : '?';
+        const script = document.createElement('script');
+        script.src = `${url}${sep}callback=${cbName}`;
+        script.async = true;
 
-      let timeout = setTimeout(() => {
-        cleanup();
-        reject(new Error('JSONP timeout'));
-      }, 15000);
+        const timeout = setTimeout(() => { cleanup(); reject(new Error('JSONP timeout')); }, 15000);
 
-      window[cbName] = (data) => {
-        clearTimeout(timeout);
-        cleanup();
-        resolve(data);
-      };
+        window[cbName] = (data) => { clearTimeout(timeout); cleanup(); resolve(data); };
+        script.onerror = () => { clearTimeout(timeout); cleanup(); reject(new Error('JSONP load error')); };
 
-      script.onerror = () => {
-        clearTimeout(timeout);
-        cleanup();
-        reject(new Error('JSONP load error'));
-      };
+        function cleanup(){ delete window[cbName]; script.remove(); }
+        document.head.appendChild(script);
+      });
+    }
 
-      function cleanup() {
-        delete window[cbName];
-        script.remove();
+    function escapeHtml(str){
+      return String(str).replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
+    }
+
+    async function init(){
+      const classSelect = document.getElementById('classSelect');
+      const statusEl    = document.getElementById('status');
+
+      statusEl.textContent = 'Đang tải danh sách lớp...';
+      try{
+        const data = await jsonp(WEB_APP_URL + '?action=classes');
+        if(!data.ok) throw new Error(data.error || 'Không lấy được danh sách lớp');
+        classSelect.innerHTML = '<option value="">-- Chọn lớp --</option>' +
+          (data.classes || []).map(c => `<option value="${encodeURIComponent(c)}">${c}</option>`).join('');
+        statusEl.textContent = `Đã tải ${data.classes.length} lớp.`;
+      }catch(err){
+        statusEl.textContent = 'Lỗi: ' + err.message;
+        classSelect.innerHTML = '<option value="">(lỗi tải lớp)</option>';
       }
+    }
 
-      document.head.appendChild(script);
+    async function loadList(){
+      const classSelect = document.getElementById('classSelect');
+      const statusEl    = document.getElementById('status');
+      const table       = document.getElementById('resultTable');
+      const tbody       = table.querySelector('tbody');
+
+      const val = decodeURIComponent(classSelect.value || '');
+      if(!val){ statusEl.textContent = 'Hãy chọn một lớp.'; return; }
+
+      statusEl.textContent = 'Đang tải danh sách...';
+      table.hidden = true; tbody.innerHTML = '';
+      try{
+        const data = await jsonp(WEB_APP_URL + '?action=list&class=' + encodeURIComponent(val));
+        if(!data.ok) throw new Error(data.error || 'Không lấy được dữ liệu');
+        const rows = data.data || [];
+        if(rows.length === 0){
+          statusEl.textContent = 'Không có dữ liệu cho lớp đã chọn.';
+          return;
+        }
+        tbody.innerHTML = rows.map((r,i)=>`
+          <tr>
+            <td>${i+1}</td>
+            <td>${escapeHtml(r.StudentID||'')}</td>
+            <td>${escapeHtml(r.FullName||'')}</td>
+            <td>${escapeHtml(r.CA_VEC||'')}</td>
+            <td>${escapeHtml(r.XE||'')}</td>
+            <td>${escapeHtml(r.Time||'')}</td>
+            <td>${escapeHtml(r.GVCN||'')}</td>
+            <td>${escapeHtml(r.DT_GVCN||'')}</td>
+            <td>${escapeHtml(r.SVTN||'')}</td>
+            <td>${escapeHtml(r.ZALO||'')}</td>
+          </tr>
+        `).join('');
+        table.hidden = false;
+        statusEl.textContent = `Tìm thấy ${rows.length} bản ghi.`;
+      }catch(err){
+        statusEl.textContent = 'Lỗi: ' + err.message;
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('btnLoad').addEventListener('click', loadList);
+      init();
     });
-  }
+  </script>
+</head>
+<body>
+  <h1>Tra cứu danh sách theo lớp</h1>
+  <div class="row">
+    <label for="classSelect">Chọn lớp:</label>
+    <select id="classSelect"><option value="">(đang tải...)</option></select>
+    <button id="btnLoad">Xem danh sách</button>
+    <span id="status" class="muted"></span>
+  </div>
 
-  function escapeHtml(str){
-    return String(str).replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
-  }
-
-  async function init(){
-    const classSelect = document.getElementById('classSelect');
-    const statusEl    = document.getElementById('status');
-
-    statusEl.textContent = 'Đang tải danh sách lớp...';
-    try{
-      const data = await jsonp(WEB_APP_URL + '?action=classes');
-      if(!data.ok) throw new Error(data.error || 'Không lấy được danh sách lớp');
-      classSelect.innerHTML = '<option value="">-- Chọn lớp --</option>' +
-        (data.classes || []).map(c => `<option value="${encodeURIComponent(c)}">${c}</option>`).join('');
-      statusEl.textContent = `Đã tải ${data.classes.length} lớp.`;
-    }catch(err){
-      statusEl.textContent = 'Lỗi: ' + err.message;
-      classSelect.innerHTML = '<option value="">(lỗi tải lớp)</option>';
-    }
-  }
-
-  async function loadList(){
-    const classSelect = document.getElementById('classSelect');
-    const statusEl    = document.getElementById('status');
-    const table       = document.getElementById('resultTable');
-    const tbody       = table.querySelector('tbody');
-
-    const val = decodeURIComponent(classSelect.value || '');
-    if(!val){ statusEl.textContent = 'Hãy chọn một lớp.'; return; }
-
-    statusEl.textContent = 'Đang tải danh sách...';
-    table.hidden = true; tbody.innerHTML = '';
-    try{
-      const data = await jsonp(WEB_APP_URL + '?action=list&class=' + encodeURIComponent(val));
-      if(!data.ok) throw new Error(data.error || 'Không lấy được dữ liệu');
-      const rows = data.data || [];
-      if(rows.length === 0){
-        statusEl.textContent = 'Không có dữ liệu cho lớp đã chọn.';
-        return;
-      }
-      tbody.innerHTML = rows.map((r,i)=>`
-        <tr>
-          <td>${i+1}</td>
-          <td>${escapeHtml(r.StudentID||'')}</td>
-          <td>${escapeHtml(r.FullName||'')}</td>
-          <td>${escapeHtml(r.Gender||'')}</td>
-          <td>${escapeHtml(r.DOB||'')}</td>
-          <td>${escapeHtml(r.Phone||'')}</td>
-          <td>${escapeHtml(r.Email||'')}</td>
-        </tr>
-      `).join('');
-      table.hidden = false;
-      statusEl.textContent = `Tìm thấy ${rows.length} bản ghi.`;
-    }catch(err){
-      statusEl.textContent = 'Lỗi: ' + err.message;
-    }
-  }
-
-  document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('btnLoad').addEventListener('click', loadList);
-    init();
-  });
-</script>
+  <table id="resultTable" hidden>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Mã SV</th>
+        <th>Họ tên</th>
+        <th>Ca VEC</th>
+        <th>Xe</th>
+        <th>Thời gian</th>
+        <th>GVCN</th>
+        <th>ĐT GVCN</th>
+        <th>SVTN</th>
+        <th>Zalo</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</body>
+</html>
