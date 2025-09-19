@@ -1,164 +1,85 @@
 <!doctype html>
 <html lang="vi">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Tra cứu danh sách tham quan VEC 2025</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Tra cứu MSSV</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
-    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    select, button { padding: 8px 10px; font-size: 14px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 16px; }
-    th, td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
-    th { background: #f5f5f5; text-align: left; }
-    .muted { opacity: .75; }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    input,button{padding:8px 10px;font-size:14px}
+    .muted{opacity:.75}
+    .card{border:1px solid #ddd;border-radius:10px;padding:16px;margin-top:16px;max-width:860px}
+    .grid{display:grid;grid-template-columns:160px 1fr;gap:8px 16px}
+    .label{font-weight:600;color:#333}
+    .notfound{color:#b00020}
   </style>
-  <script defer>
-    // ====== CẤU HÌNH ======
-    const SHEET_ID   = '1LZOvuI822HvVpNUGZmMZj5cEBEyn6gckl-TLM3zWnfo';   // <-- THAY BẰNG ID của Google Sheet
-    const SHEET_NAME = 'Data';                        // <-- nếu sheet của bạn tên khác, sửa ở đây
-    // ======================
-
-    // Util
-    function escapeHtml(str){
-      return String(str ?? '').replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
-    }
-    function jsonp(url, cbName){
-      return new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        const timeout = setTimeout(() => { cleanup(); reject(new Error('JSONP timeout')); }, 15000);
-
-        window[cbName] = (data) => { clearTimeout(timeout); cleanup(); resolve(data); };
-        script.onerror = () => { clearTimeout(timeout); cleanup(); reject(new Error('JSONP load error')); };
-
-        function cleanup(){ try { delete window[cbName]; } catch(_) { window[cbName] = undefined; } script.remove(); }
-        script.src = url;
-        script.async = true;
-        document.head.appendChild(script);
-      });
-    }
-
-    // Parse dữ liệu gviz thành array các object theo header
-    function gvizToObjects(resp){
-      // resp.table.cols: {label}, resp.table.rows: {c:[{v}, ...]}
-      const cols = resp.table.cols.map(c => (c.label || '').trim());
-      const rows = (resp.table.rows || []).map(r => (r.c || []).map(c => (c ? c.v : '')));
-      return rows.map(arr => {
-        const obj = {};
-        cols.forEach((label, i) => obj[label] = arr[i]);
-        return obj;
-      });
-    }
-
-    function buildGvizUrl(selectClause = '*'){
-      // responseHandler=<callback> để JSONP gọi đúng hàm của ta
-      const cb = 'gviz_cb_' + Math.random().toString(36).slice(2);
-      const base = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq`;
-      const tq   = encodeURIComponent(`select ${selectClause}`);
-      const tqx  = encodeURIComponent(`out:json;responseHandler:${cb}`);
-      const sheet = encodeURIComponent(SHEET_NAME);
-      return { url: `${base}?tq=${tq}&tqx=${tqx}&sheet=${sheet}`, cb };
-    }
-
-    async function init(){
-      const classSelect = document.getElementById('classSelect');
-      const statusEl    = document.getElementById('status');
-
-      statusEl.textContent = 'Đang tải danh sách lớp...';
-      try{
-        // Lấy toàn bộ data (hoặc chỉ cột LOP nếu muốn tối ưu)
-        const { url, cb } = buildGvizUrl('*');
-        const data = await jsonp(url, cb);
-        const rows = gvizToObjects(data);
-
-        // Lấy danh sách lớp duy nhất từ cột "LOP"
-        const classes = Array.from(new Set(rows.map(r => (r['LOP'] || '').toString().trim()).filter(Boolean)))
-          .sort((a,b)=>a.localeCompare(b));
-
-        // Lưu tạm vào window để dùng lại khi loadList
-        window.__GV_ROWS__ = rows;
-
-        classSelect.innerHTML = '<option value="">-- Chọn lớp --</option>' +
-          classes.map(c => `<option value="${encodeURIComponent(c)}">${c}</option>`).join('');
-        statusEl.textContent = `Đã tải ${classes.length} lớp.`;
-      }catch(err){
-        statusEl.textContent = 'Lỗi tải lớp: ' + err.message;
-        classSelect.innerHTML = '<option value="">(lỗi tải lớp)</option>';
-      }
-    }
-
-    async function loadList(){
-      const classSelect = document.getElementById('classSelect');
-      const statusEl    = document.getElementById('status');
-      const table       = document.getElementById('resultTable');
-      const tbody       = table.querySelector('tbody');
-
-      const chosen = decodeURIComponent(classSelect.value || '');
-      if(!chosen){ statusEl.textContent = 'Hãy chọn một lớp.'; return; }
-
-      statusEl.textContent = 'Đang lọc dữ liệu...';
-      table.hidden = true; tbody.innerHTML = '';
-
-      const allRows = window.__GV_ROWS__ || [];
-      // Lọc đúng lớp đã chọn
-      const rows = allRows.filter(r => (r['LOP'] || '').toString().trim() === chosen);
-
-      if(rows.length === 0){
-        statusEl.textContent = 'Không có dữ liệu cho lớp đã chọn.';
-        return;
-      }
-
-      // Map đúng các cột bạn cần
-      tbody.innerHTML = rows.map((r,i)=>`
-        <tr>
-          <td>${i+1}</td>
-          <td>${escapeHtml(r['MASINHVIEN'])}</td>
-          <td>${escapeHtml(r['HOVATEN'])}</td>
-          <td>${escapeHtml(r['CA_VEC'])}</td>
-          <td>${escapeHtml(r['XE'])}</td>
-          <td>${escapeHtml(r['THOIGIAN'])}</td>
-          <td>${escapeHtml(r['GVCN'])}</td>
-          <td>${escapeHtml(r['DT_GVCN'])}</td>
-          <td>${escapeHtml(r['SVTN'])}</td>
-          <td><a href="${escapeHtml(r['ZALO'])}" target="_blank">${escapeHtml(r['ZALO'])}</a></td>
-        </tr>
-      `).join('');
-
-      table.hidden = false;
-      statusEl.textContent = `Tìm thấy ${rows.length} bản ghi.`;
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-      document.getElementById('btnLoad').addEventListener('click', loadList);
-      init();
-    });
-  </script>
 </head>
 <body>
-  <h1>Tra cứu thông tin theo lớp</h1>
+  <h1>Tra cứu thông tin sinh viên theo MSSV</h1>
+
   <div class="row">
-    <label for="classSelect">Chọn lớp:</label>
-    <select id="classSelect"><option value="">(đang tải...)</option></select>
-    <button id="btnLoad">Xem danh sách</button>
+    <label for="msvInput">Nhập MSSV:</label>
+    <input id="msvInput" type="text" placeholder="VD: 2025xxxx">
+    <button id="btnFind">Tra cứu</button>
     <span id="status" class="muted"></span>
   </div>
 
-  <table id="resultTable" hidden>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Mã SV</th>
-        <th>Họ tên</th>
-        <th>Ca VEC</th>
-        <th>Xe</th>
-        <th>Thời gian</th>
-        <th>GVCN</th>
-        <th>ĐT GVCN</th>
-        <th>SVTN</th>
-        <th>Zalo</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div id="result"></div>
+
+  <script>
+    function escapeHtml(str){
+      return String(str ?? '').replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
+    }
+    function renderRow(row){
+      const result = document.getElementById('result');
+      if(!row){
+        result.innerHTML = `<div class="card notfound">Không tìm thấy sinh viên với MSSV đã nhập.</div>`;
+        return;
+      }
+      const fields = [
+        ['STT','STT'],
+        ['MSV','Mã sinh viên'],
+        ['HODEM','Họ đệm'],
+        ['TEN','Tên'],
+        ['HOVATEN','Họ và tên'],
+        ['LOP','Lớp'],
+        ['NGAYSINH','Ngày sinh'],
+        ['DIEM','Điểm'],
+        ['XEPLOAI','Xếp loại'],
+      ];
+      const lines = fields.map(([key,label]) => `
+        <div class="label">${escapeHtml(label)}:</div>
+        <div>${escapeHtml(row[key])}</div>
+      `).join('');
+      result.innerHTML = `<div class="card"><div class="grid">${lines}</div></div>`;
+    }
+
+    async function findStudent(){
+      const msv = (document.getElementById('msvInput').value || '').trim();
+      const statusEl = document.getElementById('status');
+      if(!msv){ statusEl.textContent = 'Nhập MSSV để tra cứu.'; renderRow(null); return; }
+
+      statusEl.textContent = 'Đang tra cứu...';
+      try{
+        // t = token đơn giản để rate-limit phía server; có thể thay bằng reCAPTCHA
+        const t = Math.random().toString(36).slice(2);
+        const apiUrl = `?api=lookup&msv=${encodeURIComponent(msv)}&t=${encodeURIComponent(t)}`;
+        const res = await fetch(apiUrl, { method: 'GET', cache: 'no-store' });
+        if(!res.ok) throw new Error('Network ' + res.status);
+        const data = await res.json();
+
+        if(!data.ok) { statusEl.textContent = data.error || 'Lỗi tra cứu'; renderRow(null); return; }
+        statusEl.textContent = data.found ? 'Đã tìm thấy 1 kết quả.' : 'Không tìm thấy kết quả.';
+        renderRow(data.data);
+      } catch(err) {
+        statusEl.textContent = 'Lỗi: ' + err.message;
+        renderRow(null);
+      }
+    }
+
+    document.getElementById('btnFind').addEventListener('click', findStudent);
+    document.getElementById('msvInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') findStudent(); });
+  </script>
 </body>
 </html>
