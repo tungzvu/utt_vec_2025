@@ -1,31 +1,137 @@
-<script>
-  // Base chính là URL /exec mà bạn đang mở
-  const API_BASE = 'https://script.google.com/macros/s/AKfycbxMaxUjgyrcdBblellGjf7KaRQUmCrR_DmF5bAchA8kWdrTk2_zHR2wNtfC8WZpqJS4/exec'
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tra cứu MSSV (GitHub Pages → Apps Script JSONP)</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    input,button{padding:8px 10px;font-size:14px}
+    .muted{opacity:.75}
+    .card{border:1px solid #ddd;border-radius:12px;padding:16px;margin-top:16px;max-width:860px}
+    .grid{display:grid;grid-template-columns:160px 1fr;gap:8px 16px}
+    .label{font-weight:600;color:#333}
+    .notfound{color:#b00020}
+    .loading{opacity:.7}
+  </style>
+  <script defer>
+    // ========== CẤU HÌNH ==========
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxMaxUjgyrcdBblellGjf7KaRQUmCrR_DmF5bAchA8kWdrTk2_zHR2wNtfC8WZpqJS4/exec'; // <-- thay bằng URL Web App /exec của bạn
+    // ==============================
 
-  async function findStudent(){
-    const msv = (document.getElementById('msvInput').value || '').trim();
-    const statusEl = document.getElementById('status');
-    if(!msv){ statusEl.textContent = 'Nhập MSSV để tra cứu.'; renderRow(null); return; }
+    // Các trường hiển thị khi tìm được (MSV là khóa tìm, nên không cần hiển thị bắt buộc; bạn có thể bật nếu muốn)
+    const FIELDS_TO_SHOW = [
+      ['STT',      'STT'],
+      // ['MSV',   'Mã sinh viên'], // bật nếu muốn hiển thị lại MSV
+      ['HODEM',    'Họ đệm'],
+      ['TEN',      'Tên'],
+      ['HOVATEN',  'Họ và tên'],
+      ['LOP',      'Lớp'],
+      ['NGAYSINH', 'Ngày sinh'],
+      ['DIEM',     'Điểm'],
+      ['XEPLOAI',  'Xếp loại'],
+    ];
 
-    statusEl.textContent = 'Đang tra cứu...';
-    try{
-      const t = Math.random().toString(36).slice(2);
-      const url = `${API_BASE}?api=lookup&msv=${encodeURIComponent(msv)}&t=${encodeURIComponent(t)}`;
+    // ===== Helpers =====
+    function escapeHtml(str){
+      return String(str ?? '').replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
+    }
+    function normId(s){
+      return (s ?? '').toString().trim().toLowerCase().replace(/\s+/g,'');
+    }
 
-      const res = await fetch(url, { method: 'GET', cache: 'no-store' });
-      const ct = (res.headers.get('content-type') || '').toLowerCase();
-      if (!ct.includes('application/json')) {
-        throw new Error('API trả về HTML (có thể bạn đang mở sai URL hoặc đang dùng GitHub Pages).');
+    // JSONP helper: thêm <script src="...&callback=cbName">
+    function jsonp(url, cbParam='callback'){
+      return new Promise((resolve, reject) => {
+        const cbName = 'cb_' + Math.random().toString(36).slice(2);
+        const sep = url.includes('?') ? '&' : '?';
+        const script = document.createElement('script');
+        script.src = `${url}${sep}${cbParam}=${cbName}`;
+        script.async = true;
+
+        const timeout = setTimeout(() => { cleanup(); reject(new Error('JSONP timeout')); }, 15000);
+
+        window[cbName] = (data) => { clearTimeout(timeout); cleanup(); resolve(data); };
+        script.onerror = () => { clearTimeout(timeout); cleanup(); reject(new Error('JSONP load error')); };
+
+        function cleanup(){ try { delete window[cbName]; } catch(_) { window[cbName] = undefined; } script.remove(); }
+
+        document.head.appendChild(script);
+      });
+    }
+
+    function renderResult(row){
+      const result = document.getElementById('result');
+      if(!row){
+        result.innerHTML = `<div class="card notfound">Không tìm thấy sinh viên với MSSV đã nhập.</div>`;
+        return;
+      }
+      const lines = FIELDS_TO_SHOW.map(([key,label]) => `
+        <div class="label">${escapeHtml(label)}:</div>
+        <div>${escapeHtml(row[key])}</div>
+      `).join('');
+      result.innerHTML = `<div class="card"><div class="grid">${lines}</div></div>`;
+    }
+
+    async function findStudent(){
+      const input   = document.getElementById('msvInput');
+      const statusEl= document.getElementById('status');
+      const result  = document.getElementById('result');
+      const msvRaw  = input.value || '';
+      const msv     = normId(msvRaw);
+
+      if(!msv){
+        statusEl.textContent = 'Nhập MSSV để tra cứu.';
+        renderResult(null);
+        return;
       }
 
-      const data = await res.json();
-      if(!data.ok){ statusEl.textContent = data.error || 'Lỗi tra cứu'; renderRow(null); return; }
+      statusEl.textContent = 'Đang tra cứu...';
+      statusEl.classList.add('loading');
+      result.innerHTML = '';
 
-      statusEl.textContent = data.found ? 'Đã tìm thấy 1 kết quả.' : 'Không tìm thấy kết quả.';
-      renderRow(data.data);
-    } catch(err) {
-      statusEl.textContent = 'Lỗi: ' + err.message;
-      renderRow(null);
+      try{
+        // t = token ngẫu nhiên để server rate-limit (nếu bạn có bật ở phía Apps Script)
+        const t  = Math.random().toString(36).slice(2);
+        const ts = Date.now(); // tránh cache
+        // Giả định API của bạn là ?api=lookup&msv=...&t=... và hỗ trợ callback JSONP
+        const url = `${GAS_URL}?api=lookup&msv=${encodeURIComponent(msvRaw)}&t=${encodeURIComponent(t)}&_=${ts}`;
+
+        const data = await jsonp(url, 'callback'); // callback param name
+        if(!data || data.ok === false){
+          const errMsg = (data && data.error) ? data.error : 'API trả về lỗi.';
+          statusEl.textContent = 'Lỗi: ' + errMsg;
+          renderResult(null);
+          return;
+        }
+
+        statusEl.textContent = data.found ? 'Đã tìm thấy 1 kết quả.' : 'Không tìm thấy kết quả.';
+        renderResult(data.data || null);
+      }catch(err){
+        statusEl.textContent = 'Lỗi: ' + err.message;
+        renderResult(null);
+      }finally{
+        statusEl.classList.remove('loading');
+      }
     }
-  }
-</script>
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('btnFind').addEventListener('click', findStudent);
+      document.getElementById('msvInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') findStudent(); });
+    });
+  </script>
+</head>
+<body>
+  <h1>Tra cứu thông tin sinh viên theo MSSV</h1>
+
+  <div class="row">
+    <label for="msvInput">Nhập MSSV:</label>
+    <input id="msvInput" type="text" placeholder="VD: 2025xxxx" />
+    <button id="btnFind">Tra cứu</button>
+    <span id="status" class="muted"></span>
+  </div>
+
+  <div id="result"></div>
+</body>
+</html>
