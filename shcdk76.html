@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Tra cứu MSSV</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:24px}
+    .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    input,button{padding:8px 10px;font-size:14px}
+    .muted{opacity:.75}
+    .card{border:1px solid #ddd;border-radius:10px;padding:16px;margin-top:16px;max-width:860px}
+    .grid{display:grid;grid-template-columns:160px 1fr;gap:8px 16px}
+    .label{font-weight:600;color:#333}
+    .notfound{color:#b00020}
+  </style>
+</head>
+<body>
+  <h1>Tra cứu thông tin sinh viên theo MSSV</h1>
+
+  <div class="row">
+    <label for="msvInput">Nhập MSSV:</label>
+    <input id="msvInput" type="text" placeholder="VD: 2025xxxx">
+    <button id="btnFind">Tra cứu</button>
+    <span id="status" class="muted"></span>
+  </div>
+
+  <div id="result"></div>
+
+  <script>
+    function escapeHtml(str){
+      return String(str ?? '').replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
+    }
+    function renderRow(row){
+      const result = document.getElementById('result');
+      if(!row){
+        result.innerHTML = `<div class="card notfound">Không tìm thấy sinh viên với MSSV đã nhập.</div>`;
+        return;
+      }
+      const fields = [
+        ['STT','STT'],
+        ['MSV','Mã sinh viên'],
+        ['HODEM','Họ đệm'],
+        ['TEN','Tên'],
+        ['HOVATEN','Họ và tên'],
+        ['LOP','Lớp'],
+        ['NGAYSINH','Ngày sinh'],
+        ['DIEM','Điểm'],
+        ['XEPLOAI','Xếp loại'],
+      ];
+      const lines = fields.map(([key,label]) => `
+        <div class="label">${escapeHtml(label)}:</div>
+        <div>${escapeHtml(row[key])}</div>
+      `).join('');
+      result.innerHTML = `<div class="card"><div class="grid">${lines}</div></div>`;
+    }
+
+    async function findStudent(){
+      const msv = (document.getElementById('msvInput').value || '').trim();
+      const statusEl = document.getElementById('status');
+      if(!msv){ statusEl.textContent = 'Nhập MSSV để tra cứu.'; renderRow(null); return; }
+
+      statusEl.textContent = 'Đang tra cứu...';
+      try{
+        // t = token đơn giản để rate-limit phía server; có thể thay bằng reCAPTCHA
+        const t = Math.random().toString(36).slice(2);
+        const apiUrl = `?api=lookup&msv=${encodeURIComponent(msv)}&t=${encodeURIComponent(t)}`;
+        const res = await fetch(apiUrl, { method: 'GET', cache: 'no-store' });
+        if(!res.ok) throw new Error('Network ' + res.status);
+        const data = await res.json();
+
+        if(!data.ok) { statusEl.textContent = data.error || 'Lỗi tra cứu'; renderRow(null); return; }
+        statusEl.textContent = data.found ? 'Đã tìm thấy 1 kết quả.' : 'Không tìm thấy kết quả.';
+        renderRow(data.data);
+      } catch(err) {
+        statusEl.textContent = 'Lỗi: ' + err.message;
+        renderRow(null);
+      }
+    }
+
+    document.getElementById('btnFind').addEventListener('click', findStudent);
+    document.getElementById('msvInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') findStudent(); });
+  </script>
+</body>
+</html>
