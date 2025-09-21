@@ -14,9 +14,13 @@
     .label{font-weight:600;color:#333}
     .notfound{color:#b00020}
     .loading{opacity:.7}
+    .debug{margin-top:12px;font-size:13px}
+    .debug a{word-break:break-all}
   </style>
   <script defer>
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbzcOKkaedd-J8Hi41IDSf2e1kMwLrfj3wseZxPZomsRhpaaXIWIiExbxNkFir6RLfpM/exec'; // <- thay
+    // ========= CẤU HÌNH =========
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbzcOKkaedd-J8Hi41IDSf2e1kMwLrfj3wseZxPZomsRhpaaXIWIiExbxNkFir6RLfpM/exec';
+    // ============================
 
     const FIELDS = [
       ['STT','STT'],
@@ -33,20 +37,52 @@
       return String(str ?? '').replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]));
     }
 
+    // JSONP helper: thêm <script> với callback ngẫu nhiên
     function jsonp(url){
       return new Promise((resolve,reject)=>{
         const cbName = 'cb_' + Math.random().toString(36).slice(2);
         const sep = url.includes('?') ? '&' : '?';
+        const cacheBust = '_=' + Date.now() + Math.random().toString(36).slice(2);
+        const fullUrl = `${url}${sep}callback=${cbName}&${cacheBust}`;
+
+        // Hiển thị link debug & log
+        const debugLink = document.getElementById('debugLink');
+        debugLink.innerHTML = `Gọi: <a href="${escapeHtml(fullUrl)}" target="_blank" rel="noopener"> ${escapeHtml(fullUrl)} </a>`;
+
         const script = document.createElement('script');
-        script.src = `${url}${sep}callback=${cbName}`;
+        script.src = fullUrl;
         script.async = true;
+        script.referrerPolicy = 'no-referrer'; // giảm rủi ro chặn vì referrer
 
-        const timeout = setTimeout(()=>{ cleanup(); reject(new Error('JSONP timeout')); }, 15000);
+        let done = false;
 
-        window[cbName] = (data)=>{ clearTimeout(timeout); cleanup(); resolve(data); };
-        script.onerror = ()=>{ clearTimeout(timeout); cleanup(); reject(new Error('JSONP load error')); };
+        const timeout = setTimeout(()=>{
+          if (done) return;
+          done = true;
+          cleanup();
+          reject(new Error('JSONP timeout (không nhận được phản hồi trong 15s)'));
+        }, 15000);
 
-        function cleanup(){ try{ delete window[cbName]; }catch(_){ window[cbName]=undefined; } script.remove(); }
+        window[cbName] = (data)=>{
+          if (done) return;
+          done = true;
+          clearTimeout(timeout);
+          cleanup();
+          resolve(data);
+        };
+
+        script.onerror = ()=>{
+          if (done) return;
+          done = true;
+          clearTimeout(timeout);
+          cleanup();
+          reject(new Error('JSONP load error (trình duyệt không tải được script từ Google Apps Script)'));
+        };
+
+        function cleanup(){
+          try{ delete window[cbName]; }catch(_){ window[cbName]=undefined; }
+          script.remove();
+        }
 
         document.head.appendChild(script);
       });
@@ -66,47 +102,40 @@
     }
 
     async function findStudent(){
-      const input = document.getElementById('msvInput');
+      const input  = document.getElementById('msvInput');
       const status = document.getElementById('status');
-      const msv = (input.value || '').trim();
-      if(!msv){ status.textContent = 'Nhập MSSV để tra cứu.'; render(null); return; }
+      const result = document.getElementById('result');
+      const msvRaw = (input.value || '').trim();
 
-      status.textContent = 'Đang tra cứu...'; status.classList.add('loading');
+      if(!msvRaw){
+        status.textContent = 'Nhập MSSV để tra cứu.';
+        render(null);
+        return;
+      }
+
+      status.textContent = 'Đang tra cứu...';
+      status.classList.add('loading');
+      result.innerHTML = '';
 
       try{
-        const ts = Date.now();
-        const url = `${GAS_URL}?api=lookup&msv=${encodeURIComponent(msv)}&_=${ts}`;
-        const data = await jsonp(url); // param callback=... sẽ tự gắn bên trong
+        // LƯU Ý: không encode đúp — dùng encodeURIComponent chỉ cho msv
+        const url = `${GAS_URL}?api=lookup&msv=${encodeURIComponent(msvRaw)}`;
 
-        if(!data || data.ok === false){
+        const data = await jsonp(url);
+        if (!data || data.ok === false){
           status.textContent = 'Lỗi: ' + (data && data.error ? data.error : 'API error');
           render(null);
           return;
         }
+
         status.textContent = data.found ? 'Đã tìm thấy 1 kết quả.' : 'Không tìm thấy kết quả.';
         render(data.data || null);
       }catch(err){
-        status.textContent = 'Lỗi: ' + err.message;
+        status.textContent = 'Lỗi: ' + err.message + '. Hãy bấm link debug bên dưới để mở trực tiếp xem phản hồi.';
         render(null);
       }finally{
         status.classList.remove('loading');
       }
     }
 
-    document.addEventListener('DOMContentLoaded', ()=>{
-      document.getElementById('btnFind').addEventListener('click', findStudent);
-      document.getElementById('msvInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') findStudent(); });
-    });
-  </script>
-</head>
-<body>
-  <h1>Tra cứu Kết quả tuần SHCD K76</h1>
-  <div class="row">
-    <label for="msvInput">Nhập MSV:</label>
-    <input id="msvInput" type="text" placeholder="VD: 2025xxxx" />
-    <button id="btnFind">Tra cứu</button>
-    <span id="status" class="muted"></span>
-  </div>
-  <div id="result"></div>
-</body>
-</html>
+    document.addEventListener('DOMCon
